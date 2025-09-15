@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32物联网电子秤</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #f0f2f5;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            padding: 30px;
+            transition: transform 0.3s ease;
+        }
+
+        .container:hover {
+            transform: translateY(-5px);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+            font-weight: 600;
+            font-size: 24px;
+        }
+
+        .weight-display {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            transition: all 0.3s ease;
+            border: 1px solid #e9ecef;
+        }
+
+        .weight-display:hover {
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        .weight-value {
+            font-size: 48px;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            transition: color 0.3s ease;
+        }
+
+        .weight-unit {
+            font-size: 18px;
+            color: #6c757d;
+        }
+
+        .connection-controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        #ip-input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        #ip-input:focus {
+            outline: none;
+            border-color: #4d90fe;
+            box-shadow: 0 0 0 3px rgba(77, 144, 254, 0.2);
+        }
+
+        button {
+            padding: 12px 24px;
+            background-color: #4d90fe;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #307af3;
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background-color: #adb5bd;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-box {
+            padding: 15px;
+            border-radius: 6px;
+            font-size: 14px;
+            min-height: 50px;
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+
+        .status-disconnected {
+            background-color: #fff5f5;
+            color: #c53030;
+            border-color: #ffe3e3;
+        }
+
+        .status-connecting {
+            background-color: #fffbf0;
+            color: #c05621;
+            border-color: #ffe8cc;
+        }
+
+        .status-connected {
+            background-color: #f0fff4;
+            color: #22543d;
+            border-color: #c6f6d5;
+        }
+
+        .footer {
+            margin-top: 20px;
+            color: #6c757d;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        @media (max-width: 480px) {
+            .connection-controls {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .weight-value {
+                font-size: 36px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ESP32物联网电子秤</h1>
+        
+        <div class="weight-display">
+            <div class="weight-value">0</div>
+            <div class="weight-unit">克 (g)</div>
+        </div>
+        
+        <div class="connection-controls">
+            <input type="text" id="ip-input" placeholder="输入ESP32的IP地址" value="">
+            <button id="connect-btn">连接</button>
+        </div>
+        
+        <div class="status-box status-disconnected" id="status-box">
+            未连接，请输入服务器地址并点击连接按钮
+        </div>
+    </div>
+    
+    <div class="footer">
+        ESP32物联网电子秤 &copy; 2025
+    </div>
+
+    <script>
+        // 获取DOM元素
+        const ipInput = document.getElementById('ip-input');
+        const connectBtn = document.getElementById('connect-btn');
+        const statusBox = document.getElementById('status-box');
+        const weightValue = document.querySelector('.weight-value');
+        
+        // WebSocket实例
+        let websocket = null;
+        let isConnected = false;
+        
+        // 更新状态显示
+        function updateStatus(message, status) {
+            statusBox.textContent = message;
+            statusBox.className = 'status-box';
+            statusBox.classList.add(`status-${status}`);
+        }
+        
+        // 更新重量显示
+        function updateWeight(weight) {
+             weightValue.textContent = weight
+        }
+        
+        // 连接WebSocket
+        function connectWebSocket() {
+            if (isConnected) {
+                // 断开连接
+                if (websocket) {
+                    websocket.close();
+                }
+                return;
+            }
+            
+            let wsUrl = ipInput.value.trim();
+            wsUrl=`ws://${wsUrl}:81`
+            console.log(wsUrl)
+            if (!wsUrl) {
+                alert('请输入WebSocket服务器地址');
+                return;
+            }
+            
+            // 验证URL格式
+            try {
+                new URL(wsUrl);
+            } catch (e) {
+                alert('请输入有效的WebSocket地址，如：ws://192.168.1.1:8080');
+                return;
+            }
+            
+            updateStatus('正在连接到服务器...', 'connecting');
+            connectBtn.disabled = true;
+            
+            // 创建WebSocket连接
+            websocket = new WebSocket(wsUrl);
+            
+            // 连接成功
+            websocket.onopen = function() {
+                isConnected = true;
+                connectBtn.textContent = '断开';
+                connectBtn.disabled = false;
+                updateStatus(`已成功连接到 ${wsUrl}`, 'connected');
+            };
+            
+            // 接收消息
+            websocket.onmessage = function(event) {
+                  const weight = parseFloat(event.data);
+                    if (!isNaN(weight)) {
+                        updateWeight(weight);
+                    } else {
+                        console.log('接收到消息:', event.data);
+                        updateStatus(`接收到消息: ${event.data}`, 'connected');
+                    }
+            };
+            
+            // 连接关闭
+            websocket.onclose = function() {
+                isConnected = false;
+                connectBtn.textContent = '连接';
+                connectBtn.disabled = false;
+                updateStatus('连接已断开', 'disconnected');
+            };
+            
+            // 连接错误
+            websocket.onerror = function(error) {
+                console.error('WebSocket错误:', error);
+                updateStatus(`连接错误: ${error.message || '未知错误'}`, 'disconnected');
+                isConnected = false;
+                connectBtn.textContent = '连接';
+                connectBtn.disabled = false;
+            };
+        }
+        
+        // 绑定按钮点击事件
+        connectBtn.addEventListener('click', connectWebSocket);
+        
+        // 按Enter键连接
+        ipInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                connectWebSocket();
+            }
+        });
+    </script>
+</body>
+</html>
